@@ -1,0 +1,517 @@
+# Instrumented build variants for testing development environments
+#
+# After the branching variants in this file
+# should NOT run on a new rapid release (v7.1, v7.2 etc.)
+# and LTS release (v7.0, v6.0 etc.) branch projects
+
+variables:
+  # THIS HAS COPIES IN
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/rhel/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/wiredtiger/test_dev_master_branch_only.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &generic_linux_compile_expansions # The most commonly used compile expansions.
+    scons_cache_scope: shared
+    scons_cache_mode: all
+    has_packages: false
+
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/rhel/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/rhel/test_dev.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &linux_x86_dynamic_compile_variant_dependency
+    depends_on:
+      - name: archive_dist_test_debug
+        variant: &linux_x86_dynamic_compile_variant_name linux-x86-dynamic-compile
+      - name: version_gen
+        variant: generate-tasks-for-version
+        # This is added because of EVG-18211.
+        # Without this we are adding extra dependencies on evergreen and it is causing strain
+        omit_generated_tasks: true
+    # - name: generate_buildid_to_debug_symbols_mapping
+    #   variant: linux-x86-dynamic-compile
+
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &linux_debug_aubsan_compile_variant_dependency
+    depends_on:
+      - name: archive_dist_test_debug
+        variant: &linux_debug_aubsan_compile_variant_name linux-debug-aubsan-compile-required
+      - name: version_gen
+        variant: generate-tasks-for-version
+        # This is added because of EVG-18211.
+        # Without this we are adding extra dependencies on evergreen and it is causing strain
+        omit_generated_tasks: true
+    # - name: generate_buildid_to_debug_symbols_mapping
+    #   variant: linux-debug-aubsan-compile-required
+
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/rhel/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/rhel/test_dev.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &linux_x86_generic_expansions
+    multiversion_platform: rhel80
+    multiversion_edition: enterprise
+    repo_edition: enterprise
+    large_distro_name: rhel80-medium
+    core_analyzer_distro_name: rhel80-xlarge
+    num_scons_link_jobs_available: 0.99
+    compile_variant: *linux_x86_dynamic_compile_variant_name
+
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/rhel/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/rhel/test_dev.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &enterprise-rhel-80-64-bit-dynamic-expansions
+    <<: *linux_x86_generic_expansions
+    scons_cache_scope: shared
+    scons_cache_mode: all
+    has_packages: false
+    jstestfuzz_num_generated_files: 40
+    jstestfuzz_concurrent_num_files: 10
+    target_resmoke_time: 10
+    max_sub_suites: 5
+    idle_timeout_factor: 1.5
+    exec_timeout_factor: 1.5
+    large_distro_name: rhel80-medium
+
+  # If you add anything to san_options, make sure the appropriate changes are
+  # also made to SConstruct.
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - aubsan_options: &aubsan_options >-
+      UBSAN_OPTIONS="print_stacktrace=1:external_symbolizer_path=/opt/mongodbtoolchain/v4/bin/llvm-symbolizer"
+      LSAN_OPTIONS="suppressions=etc/lsan.suppressions:report_objects=1"
+      ASAN_OPTIONS="detect_leaks=1:check_initialization_order=true:strict_init_order=true:abort_on_error=1:disable_coredump=0:handle_abort=1:strict_string_checks=true:detect_invalid_pointer_pairs=1:external_symbolizer_path=/opt/mongodbtoolchain/v4/bin/llvm-symbolizer"
+
+  # If you add anything to san_options, make sure the appropriate changes are
+  # also made to SConstruct.
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - ubsan_options: &ubsan_options UBSAN_OPTIONS="print_stacktrace=1:external_symbolizer_path=/opt/mongodbtoolchain/v4/bin/llvm-symbolizer"
+
+  # THIS HAS COPIES IN:
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev_master_branch_only.yml
+  # - etc/evergreen_yml_components/variants/sanitizer/test_dev.yml
+  # ANY MODIFICATIONS HERE SHOULD ALSO BE MADE IN THOSE FILES
+  - &aubsan-lite-required-expansions
+    compile_variant: *linux_debug_aubsan_compile_variant_name
+    lang_environment: LANG=C
+    san_options: *aubsan_options
+    resmoke_jobs_factor: 0.3 # Avoid starting too many mongod's under {A,UB}SAN build.
+    hang_analyzer_dump_core: false
+    max_sub_suites: 3
+    num_scons_link_jobs_available: 0.99
+    large_distro_name: rhel80-build
+    multiversion_platform: rhel80
+    multiversion_edition: enterprise
+    gcov_tool: /opt/mongodbtoolchain/v4/bin/gcov
+
+buildvariants:
+  ###########################################
+  #          Redhat buildvariants           #
+  ###########################################
+
+  - name: &enterprise-rhel-80-64-bit-dynamic-debug-mode enterprise-rhel-80-64-bit-dynamic-debug-mode
+    display_name: "Shared Library Enterprise RHEL 8.0 Debug Mode"
+    tags: []
+    cron: "0 4 * * 0" # From the ${project_weekly_cron} parameter
+    run_on:
+      - rhel80-small
+    stepback: false
+    expansions:
+      <<: *enterprise-rhel-80-64-bit-dynamic-expansions
+      compile_variant: *enterprise-rhel-80-64-bit-dynamic-debug-mode
+      compile_flags: >-
+        --ssl
+        MONGO_DISTMOD=rhel80
+        -j$(grep -c ^processor /proc/cpuinfo)
+        --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars
+        --link-model=dynamic
+        --use-glibcxx-debug
+        --dbg=on
+        --allocator=system
+        --use-diagnostic-latches=on
+      exec_timeout_secs: 32400 # 9 hour timeout
+      timeout_secs: 18000 # 5 hour idle timeout
+      large_distro_name: &enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name rhel80-xlarge
+    depends_on: []
+    tasks:
+      - name: compile_test_parallel_core_stream_TG
+        distros:
+          - rhel80-xlarge
+      - name: compile_test_parallel_unittest_stream_TG
+        distros:
+          - rhel80-xlarge
+      - name: compile_test_parallel_dbtest_stream_TG
+        distros:
+          - rhel80-xlarge
+      - name: compile_integration_and_test_parallel_stream_TG
+        distros:
+          - rhel80-large
+      - name: crypt_build_debug_and_test
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .development_critical !.requires_large_host !.requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+      - name: .development_critical .requires_large_host !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .development_critical .requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .release_critical !.requires_large_host !.requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+      - name: .release_critical .requires_large_host !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .release_critical .requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .default !.requires_large_host !.requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+      - name: .default .requires_large_host !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .default .requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .non_deterministic !.requires_large_host !.requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+      - name: .non_deterministic .requires_large_host !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+      - name: .non_deterministic .requires_large_host_debug_mode !.incompatible_development_variant !.incompatible_debug_mode !.requires_all_feature_flags
+        distros:
+          - *enterprise-rhel-80-64-bit-dynamic-debug-mode-large-distro-name
+
+  ###########################################
+  #         Windows buildvariants           #
+  ###########################################
+
+  - name: &windows-debug-suggested windows-debug-suggested
+    display_name: "* Windows DEBUG"
+    tags: ["suggested"]
+    cron: "0 */4 * * *" # From the ${project_required_suggested_cron} parameter
+    run_on:
+      - windows-vsCurrent-small
+    expansions:
+      exe: ".exe"
+      content_type: application/zip
+      compile_flags: >-
+        --dbg=on
+        --opt=on
+        --win-version-min=win10
+        -j$(bc <<< "$(grep -c '^processor' /proc/cpuinfo) / 1.8")
+        MONGO_DISTMOD=windows
+        --use-diagnostic-latches=on
+        --modules=
+      num_scons_link_jobs_available: 0.2
+      python: "/cygdrive/c/python/python310/python.exe"
+      ext: zip
+      scons_cache_scope: shared
+      multiversion_platform: windows
+      multiversion_edition: enterprise
+      large_distro_name: windows-vsCurrent-large
+      test_flags: >-
+        --excludeWithAnyTags=incompatible_with_windows_tls
+        --enableEnterpriseTests=off
+      compile_variant: *windows-debug-suggested
+    tasks:
+      - name: compile_test_serial_TG
+        distros:
+          - windows-vsCurrent-xxlarge
+      - name: compile_test_parallel_unittest_stream_TG
+        distros:
+          - windows-vsCurrent-xxlarge
+      - name: compile_integration_and_test_no_audit_parallel_stream_TG
+        distros:
+          - windows-vsCurrent-xlarge
+      - name: .development_critical !.requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_windows !.requires_all_feature_flags
+      - name: .development_critical .requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_windows !.requires_all_feature_flags
+        distros:
+          - windows-vsCurrent-large
+      - name: .release_critical !.requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_windows !.requires_all_feature_flags
+      - name: .release_critical .requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_windows !.requires_all_feature_flags
+        distros:
+          - windows-vsCurrent-large
+
+  - name: &enterprise-windows-debug-unoptimized enterprise-windows-debug-unoptimized
+    display_name: "Enterprise Windows DEBUG (Unoptimized)"
+    tags: []
+    cron: "0 4 * * *" # From the ${project_nightly_cron} parameter.
+    run_on:
+      - windows-vsCurrent-small
+    expansions:
+      compile_variant: *enterprise-windows-debug-unoptimized
+      additional_package_targets: >-
+        archive-mongocryptd
+        archive-mongocryptd-debug
+      exe: ".exe"
+      content_type: application/zip
+      compile_flags: >-
+        --dbg=on
+        --opt=off
+        --ssl
+        MONGO_DISTMOD=windows
+        CPPPATH="c:/sasl/include"
+        LIBPATH="c:/sasl/lib"
+        -j$(bc <<< "$(grep -c '^processor' /proc/cpuinfo) / 1.5")
+        --win-version-min=win10
+        --use-diagnostic-latches=on
+      num_scons_link_jobs_available: 0.25
+      python: "/cygdrive/c/python/python310/python.exe"
+      ext: zip
+      resmoke_jobs_max: 1
+      scons_cache_scope: shared
+      test_flags: >-
+        --excludeWithAnyTags=incompatible_with_windows_tls
+    tasks:
+      # This variant tests that unoptimized, DEBUG mongos and mongod binaries can run on Windows.
+      # It has a minimal amount of tasks because unoptimized builds are slow, which causes
+      # timing-sensitive tests to fail.
+      - name: compile_and_archive_dist_test_TG
+        distros:
+          - windows-vsCurrent-xxlarge
+      - name: compile_build_tools_next_TG
+        distros:
+          - windows-vsCurrent-xxlarge
+      - name: audit
+    # Do not add more tasks to this list.
+
+  ###########################################
+  #         macos buildvariants             #
+  ###########################################
+
+  - &macos-debug-template
+    name: &macos-debug-suggested macos-debug-suggested
+    display_name: "* macOS DEBUG"
+    tags: ["suggested"]
+    cron: "0 */4 * * *" # From the ${project_required_suggested_cron} parameter
+    run_on:
+      - macos-1100
+    expansions: &macos-debug-expansions
+      compile_variant: *macos-debug-suggested
+      test_flags: >-
+        --excludeWithAnyTags=incompatible_with_macos
+        --enableEnterpriseTests=off
+      resmoke_jobs_max: 6
+      compile_env: DEVELOPER_DIR=/Applications/Xcode13.app
+      compile_flags: >-
+        --ssl
+        --dbg=on
+        --opt=on
+        -j$(sysctl -n hw.logicalcpu)
+        --libc++
+        --variables-files=etc/scons/xcode_macosx.vars
+        --use-diagnostic-latches=on
+        --modules=
+      num_scons_link_jobs_available: 0.99
+    tasks:
+      - name: compile_test_serial_TG
+      - name: compile_test_parallel_unittest_stream_TG
+      - name: .development_critical !.requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_mac !.requires_all_feature_flags
+      - name: .development_critical .requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_mac !.requires_all_feature_flags
+        distros:
+          - macos-1100
+      - name: .release_critical !.requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_mac !.requires_all_feature_flags
+      - name: .release_critical .requires_large_host !.incompatible_development_variant !.incompatible_community !.incompatible_mac !.requires_all_feature_flags
+        distros:
+          - macos-1100
+
+  - name: &enterprise-macos enterprise-macos
+    display_name: "Enterprise macOS DEBUG"
+    tags: []
+    cron: "0 4 * * *" # From the ${project_nightly_cron} parameter.
+    run_on:
+      - macos-1100
+    expansions:
+      compile_variant: *enterprise-macos
+      test_flags: --excludeWithAnyTags=incompatible_with_macos,requires_gcm
+      compile_env: DEVELOPER_DIR=/Applications/Xcode13.app
+      compile_flags: >-
+        --ssl
+        --dbg=on
+        --opt=on
+        -j$(sysctl -n hw.logicalcpu)
+        --libc++
+        --variables-files=etc/scons/xcode_macosx.vars
+        --use-diagnostic-latches=on
+      resmoke_jobs_max: 6
+      num_scons_link_jobs_available: 0.99
+    tasks:
+      - name: compile_test_serial_TG
+      - name: compile_test_parallel_unittest_stream_TG
+      - name: audit
+      - name: auth_audit_gen
+      - name: fle
+      - name: fle2
+      - name: .jscore .common !.decimal !.sharding
+      - name: replica_sets_auth_gen
+      - name: sasl
+      - name: .crypt
+
+  ###########################################
+  #     Experimental buildvariants          #
+  ###########################################
+
+  - &rhel80-debug-ubsan-all-feature-flags-template
+    name: &rhel80-debug-ubsan-all-feature-flags rhel80-debug-ubsan-all-feature-flags
+    display_name: "* Shared Library UBSAN Enterprise RHEL 8.0 DEBUG (all feature flags)"
+    tags: ["suggested"]
+    cron: "0 4 * * *" # From the ${project_nightly_cron} parameter.
+    run_on:
+      - rhel80-build
+    stepback: false
+    expansions:
+      toolchain_version: stable
+      additional_package_targets: >-
+        archive-mongocryptd
+        archive-mongocryptd-debug
+      lang_environment: LANG=C
+      san_options: *ubsan_options
+      # TODO SERVER-86610 add tcmalloc-google as the allocator for ubsan
+      compile_flags: >-
+        --variables-files=etc/scons/mongodbtoolchain_${toolchain_version}_clang.vars
+        --dbg=on
+        --opt=on
+        --sanitize=undefined
+        --ssl
+        --allocator=tcmalloc-gperf
+        -j$(grep -c ^processor /proc/cpuinfo)
+        --use-diagnostic-latches=on
+      compile_variant: *rhel80-debug-ubsan-all-feature-flags
+      # To force disable feature flags even on the all feature flags variant, please use this file:
+      # buildscripts/resmokeconfig/fully_disabled_feature_flags.yml
+      test_flags: >-
+        --excludeWithAnyTags=requires_increased_memlock_limits,all_feature_flags_incompatible
+        --runAllFeatureFlagTests
+      multiversion_platform: rhel80
+      multiversion_edition: enterprise
+      resmoke_jobs_factor: 0.3 # Avoid starting too many mongod's under UBSAN build.
+      scons_cache_scope: shared
+      separate_debug: off
+      large_distro_name: rhel80-build
+    tasks:
+      - name: compile_and_archive_dist_test_TG
+      - name: .concurrency !.no_txns !.repl !.kill_terminate
+      - name: disk_wiredtiger
+      - name: generate_buildid_to_debug_symbols_mapping
+
+  - <<: *linux_debug_aubsan_compile_variant_dependency
+    name: &rhel80-debug-aubsan-all-feature-flags rhel80-debug-aubsan-all-feature-flags
+    display_name: "* Shared Library {A,UB}SAN Enterprise RHEL 8.0 DEBUG (all feature flags)"
+    tags: ["suggested"]
+    cron: "0 4 * * *" # From the ${project_required_suggested_cron} parameter
+    run_on:
+      - rhel80-build
+    expansions:
+      <<: *aubsan-lite-required-expansions
+      # To force disable feature flags even on the all feature flags variant, please use this file:
+      # buildscripts/resmokeconfig/fully_disabled_feature_flags.yml
+      test_flags: >-
+        --runAllFeatureFlagTests
+    tasks:
+      - name: .development_critical !.requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+      - name: .development_critical .requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+        distros:
+          - rhel80-large
+      - name: .release_critical !.requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+      - name: .release_critical .requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+        distros:
+          - rhel80-large
+      - name: .default !.requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+      - name: .default .requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+        distros:
+          - rhel80-large
+      - name: .non_deterministic !.requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+      - name: .non_deterministic .requires_large_host !.requires_compile_variant !.incompatible_development_variant !.incompatible_aubsan !.incompatible_all_feature_flags
+        distros:
+          - rhel80-large
+
+  - <<: *linux_debug_aubsan_compile_variant_dependency
+    name: &rhel80-debug-aubsan-experimental-all-feature-flags rhel80-debug-aubsan-experimental-all-feature-flags
+    display_name: "* Shared Library {A,UB}SAN Enterprise RHEL 8.0 DEBUG Experimental (all feature flags)"
+    tags: ["suggested"]
+    cron: "0 4 * * *" # From the ${project_required_suggested_cron} parameter
+    run_on:
+      - rhel80-build
+    expansions:
+      <<: *aubsan-lite-required-expansions
+      # To force disable feature flags even on the all feature flags variant, please use this file:
+      # buildscripts/resmokeconfig/fully_disabled_feature_flags.yml
+      test_flags: >-
+        --runAllFeatureFlagTests
+    tasks:
+      - name: .multiversion_fuzzer
+      - name: .multiversion_passthrough
+      - name: .random_multiversion_ds
+      - name: .watchdog
+
+  - name: &rhel80-debug-aubsan-benchmarks rhel80-debug-aubsan-benchmarks
+    display_name: "* {A,UB}SAN Enterprise RHEL 8.0 DEBUG (Benchmarks)"
+    tags: ["suggested"]
+    cron: "0 4 * * *" # From the ${project_nightly_cron} parameter.
+    run_on:
+      - rhel80-build
+    expansions:
+      <<: *generic_linux_compile_expansions
+      separate_debug: off
+      san_options: *aubsan_options
+      compile_flags: >-
+        --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars
+        --dbg=on
+        --opt=on
+        --allocator=system
+        --sanitize=undefined,address
+        --ssl
+        -j$(grep -c ^processor /proc/cpuinfo)
+        --link-model=dynamic
+        --use-diagnostic-latches=on
+      test_flags: >-
+        --benchmarkRepetitions=1
+      compile_variant: *rhel80-debug-aubsan-benchmarks
+    tasks:
+      - name: compile_upload_benchmarks_TG
+        distros:
+          - rhel80-xlarge
+      - name: .benchmarks
+
+  - name: &enterprise-rhel80-unoptimized-64-bit enterprise-rhel80-unoptimized-64-bit
+    display_name: "~ Enterprise RHEL 8.0 DEBUG (Unoptimized)"
+    tags: ["bazel_check"]
+    cron: "0 4 * * *" # From the ${project_nightly_cron} parameter.
+    expansions:
+      compile_flags: >-
+        MONGO_DISTMOD=rhel80
+        -j$(grep -c ^processor /proc/cpuinfo)
+        --dbg=on
+        --opt=off
+        --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars
+        --detect-odr-violations
+        --linker=gold
+        --link-model=dynamic
+        --use-diagnostic-latches=on
+      scons_cache_mode: all
+      scons_cache_scope: shared
+      num_scons_link_jobs_available: 0.99
+      compile_variant: *enterprise-rhel80-unoptimized-64-bit
+    tasks:
+      - name: compile_test_parallel_core_stream_TG
+        distros:
+          - rhel80-build
+      - name: compile_test_parallel_unittest_stream_TG
+        distros:
+          - rhel80-build
+      - name: compile_test_parallel_dbtest_stream_TG
+        distros:
+          - rhel80-build
+      - name: generate_buildid_to_debug_symbols_mapping
+        distros:
+          - rhel80-build

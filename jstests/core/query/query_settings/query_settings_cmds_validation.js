@@ -1,0 +1,191 @@
+// Tests query settings validation rules.
+// @tags: [
+//   directly_against_shardsvrs_incompatible,
+//   simulate_atlas_proxy_incompatible,
+//   requires_fcv_80,
+// ]
+//
+
+import {assertDropAndRecreateCollection} from "jstests/libs/collection_drop_recreate.js"
+import {QuerySettingsUtils} from "jstests/libs/query_settings_utils.js";
+
+const collName = jsTestName();
+assertDropAndRecreateCollection(db, collName);
+
+const qsutils = new QuerySettingsUtils(db, collName);
+qsutils.removeAllQuerySettings();
+
+const querySettingsA = {
+    indexHints: {ns: {db: db.getName(), coll: collName}, allowedIndexes: ["a_1", {$natural: 1}]}
+};
+const nonExistentQueryShapeHash = "0".repeat(64);
+
+{
+    // Ensure that setQuerySettings command fails for invalid input.
+    assert.commandFailedWithCode(
+        db.adminCommand({setQuerySettings: {notAValid: "query"}, settings: querySettingsA}),
+        7746402);
+    assert.commandFailedWithCode(
+        db.adminCommand(
+            {setQuerySettings: qsutils.makeFindQueryInstance(), settings: {notAValid: "settings"}}),
+        ErrorCodes.IDLUnknownField);
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: qsutils.makeFindQueryInstance(),
+        settings: {indexHints: {allowedIndexes: ["a_1"]}}
+    }),
+                                 ErrorCodes.IDLFailedToParse);
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: qsutils.makeFindQueryInstance(),
+        settings: {indexHints: {ns: {db: db.getName()}, allowedIndexes: ["a_1"]}}
+    }),
+                                 8727501);
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: qsutils.makeFindQueryInstance(),
+        settings: {indexHints: {ns: {coll: collName}, allowedIndexes: ["a_1"]}}
+    }),
+                                 8727500);
+}
+
+{
+    // Ensure that removeQuerySettings command ignores for invalid input.
+    assert.commandWorked(db.adminCommand({removeQuerySettings: nonExistentQueryShapeHash}));
+    assert.commandFailedWithCode(db.adminCommand({removeQuerySettings: {notAValid: "query"}}),
+                                 7746402);
+}
+
+{
+    // Ensure that $querySettings agg stage inherits the constraints from the underlying alias
+    // stages, including $queue.
+    assert.commandFailedWithCode(
+        db.adminCommand(
+            {aggregate: 1, pipeline: [{$documents: []}, {$querySettings: {}}], cursor: {}}),
+        40602);
+}
+
+{
+    // Ensure that setQuerySettings command fails when multiple index hints refer to the same coll.
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: {find: collName, filter: {a: 123}, $db: db.getName()},
+        settings: {
+            "indexHints": [
+                {"ns": {"db": db.getName(), "coll": collName}, "allowedIndexes": [{"sku": 1}]},
+                {"ns": {"db": db.getName(), "coll": collName}, "allowedIndexes": [{"uks": 1}]},
+            ]
+        }
+    }),
+                                 7746608);
+}
+
+{
+    // Ensure setQuerySettings fails for internal dbs.
+    function testInternalDBQuerySettings(dbName, collection, index) {
+        // Ensure that setQuerySettings command fails for this db.
+        assert.commandFailedWithCode(db.adminCommand({
+            setQuerySettings: {find: collection, $db: dbName},
+            settings: {
+                "indexHints": [
+                    {"ns": {"db": dbName, "coll": collection}, "allowedIndexes": [index]},
+                ]
+            }
+        }),
+                                     8584900);
+    }
+    testInternalDBQuerySettings("admin", "system.version", {version: 1});
+    testInternalDBQuerySettings("local", "system.views", {viewOn: 1});
+    testInternalDBQuerySettings("config", "clusterParameters", {clusterParameterTime: 1});
+}
+
+{
+    // Ensure setQuerySettings fails for system collections.
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: {find: "system.foobar", $db: db.getName()},
+        settings: {
+            "indexHints": [
+                {
+                    "ns": {"db": db.getName(), "coll": "system.foobar"},
+                    "allowedIndexes": [{"anything": 1}]
+                },
+            ]
+        }
+    }),
+                                 8584901);
+}
+
+{
+    // Ensure that inserting empty settings fails.
+    const query = qsutils.makeFindQueryInstance({filter: {a: 15}});
+    assert.commandFailedWithCode(db.adminCommand({setQuerySettings: query, settings: {}}), 8727502);
+
+    // Insert some settings.
+    assert.commandWorked(db.adminCommand({setQuerySettings: query, settings: {reject: true}}));
+    qsutils.assertQueryShapeConfiguration(
+        [qsutils.makeQueryShapeConfiguration({reject: true}, query)]);
+
+    // Ensure updating with empty query settings fails.
+    const queryShapeHash = qsutils.getQueryHashFromQuerySettings(query);
+    assert.commandFailedWithCode(db.adminCommand({setQuerySettings: queryShapeHash, settings: {}}),
+                                 8727502);
+    assert.commandFailedWithCode(db.adminCommand({setQuerySettings: query, settings: {}}), 8727502);
+    qsutils.assertQueryShapeConfiguration(
+        [qsutils.makeQueryShapeConfiguration({reject: true}, query)]);
+
+    // Clean-up after the end of the test.
+    qsutils.removeAllQuerySettings();
+}
+
+{
+    // Ensure that 'setQuerySettings' command works when some but not all of 'allowedIndex' lists
+    // are empty. The second document is ignored in this case.
+    const query = qsutils.makeFindQueryInstance({filter: {a: 15}});
+    assert.commandWorked(db.adminCommand({
+        setQuerySettings: query,
+        settings: {
+            "indexHints": [
+                {"ns": {"db": db.getName(), "coll": "collNameA"}, "allowedIndexes": [{"a": 1}]},
+                {"ns": {"db": db.getName(), "coll": "collNameB"}, "allowedIndexes": []},
+            ]
+        }
+    }));
+
+    // Assert that the settings only contain hints for collection with non-empty 'allowedIndexes'.
+    qsutils.assertQueryShapeConfiguration([qsutils.makeQueryShapeConfiguration({
+        "indexHints":
+            [{"ns": {"db": db.getName(), "coll": "collNameA"}, "allowedIndexes": [{"a": 1}]}]
+    },
+                                                                               query)]);
+
+    // Clean-up after the end of the test.
+    qsutils.removeAllQuerySettings();
+}
+
+{
+    // Start with an empty query settings.
+    qsutils.removeAllQuerySettings();
+    qsutils.assertQueryShapeConfiguration([]);
+
+    // Ensure that setQuerySettings command fails for query settings with emply 'allowedIndexes'.
+    // This is equivalent to query settings without 'indexHints' provided.
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: {find: collName, filter: {a: 123}, $db: db.getName()},
+        settings: {
+            indexHints: [
+                {ns: {db: db.getName(), coll: "collNameA"}, allowedIndexes: []},
+                {ns: {db: db.getName(), coll: "collNameB"}, allowedIndexes: []},
+            ]
+        }
+    }),
+                                 7746604);
+
+    // Version where 'indexHints' is a single document instead of a list.
+    assert.commandFailedWithCode(db.adminCommand({
+        setQuerySettings: {find: collName, filter: {a: 123}, $db: db.getName()},
+        settings: {
+            indexHints: {ns: {db: db.getName(), coll: collName}, allowedIndexes: []}
+
+        }
+    }),
+                                 7746604);
+
+    // Clean-up after the end of the test.
+    qsutils.removeAllQuerySettings();
+}

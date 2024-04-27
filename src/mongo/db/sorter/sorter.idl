@@ -1,0 +1,31 @@
+global:
+    cpp_namespace: "mongo"
+
+imports:
+    - "mongo/db/basic_types.idl"
+
+enums:
+    SorterChecksumVersion:
+        description: "The version of checksum that dictates what hash was used to calculate it."
+        type: int
+        values:
+            v1: 1
+            v2: 2
+
+structs:
+    SorterRange:
+        description: "The range of data that was sorted and spilled to disk."
+        fields:
+            startOffset:
+                description: "Tracks where in the file we started writing this data range."
+                type: long
+            endOffset:
+                description: "Tracks where in the file we finished writing this data range."
+                type: long
+            checksum:
+                description: "Tracks the hash of all data objects spilled to disk."
+                type: long
+            checksumVersion:
+                description: "The version of checksum that dictates what hash was used to calculate it."
+                type: SorterChecksumVersion
+                optional: true

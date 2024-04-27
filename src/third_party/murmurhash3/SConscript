@@ -1,0 +1,6 @@
+Import("env")
+
+env.BazelLibrary(
+    target='murmurhash3',
+    source=['MurmurHash3.cpp'],
+)
